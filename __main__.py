@@ -1,3 +1,5 @@
+from typing import Dict
+
 import pulumi
 from pulumi_aws import ec2, rds
 
@@ -14,18 +16,24 @@ class MariaDB:
     database: rds.Instance
     security_group: ec2.SecurityGroup
 
-    def __init__(self, name: str):
-        self.name = name
-        self.config = pulumi.Config()
-        self.tags = self.config.get_object("tags")
+    def __init__(self, pulumi_name: str):
+        self.pulumi_name = pulumi_name
+        # Get and set config values.
+        config = pulumi.Config()
+        self.db_username: str = config.require_object("mariadb")["username"]
+        self.db_password: str = config.require_object("mariadb")["password"]
+        self.db_name: str = config.require_object("mariadb")["database_name"]
+        # AWS tags.
+        self.aws_tags: Dict = config.require_object("aws_tags")
+        self.owner: str = self.aws_tags["rs:owner"]
+        # Create infrastructure.
         self.security_group = self.create_security_group()
         self.database = self.create_database()
 
     def create_security_group(self) -> ec2.SecurityGroup:
         return ec2.SecurityGroup(
-            f"Security Group - {self.name}",
-            description=self.tags["rs:owner"]
-            + " security group for Pulumi MariaDB deployment.",
+            f"Security Group - {self.pulumi_name}",
+            description=self.owner + " security group for Pulumi MariaDB deployment.",
             ingress=[
                 {
                     "protocol": "TCP",
@@ -44,8 +52,7 @@ class MariaDB:
                     "description": "Allow all outbound traffic",
                 },
             ],
-            tags=self.tags
-            | {"Name": f"mariadb-{self.tags['rs:owner']}-security-group"},
+            tags=self.aws_tags | {"Name": f"mariadb-{self.owner}-security-group"},
         )
 
     def create_database(self):
@@ -53,16 +60,16 @@ class MariaDB:
         Create a MariaDB database.
         """
         db = rds.Instance(
-            self.name,
+            self.pulumi_name,
             instance_class="db.t3.micro",
             allocated_storage=20,
-            username=self.config.get_object("mariadb")["username"],
-            password=self.config.get_object("mariadb")["password"],
-            db_name=self.config.get_object("mariadb")["database_name"],
+            username=self.db_username,
+            password=self.db_password,
+            db_name=self.db_name,
             engine="mariadb",
             publicly_accessible=True,
             skip_final_snapshot=True,
-            tags=self.tags | {"Name": f"mariadb-{self.tags['rs:owner']}-database"},
+            tags=self.aws_tags | {"Name": f"mariadb-{self.owner}-database"},
             vpc_security_group_ids=[self.security_group.id],
         )
 
@@ -71,6 +78,14 @@ class MariaDB:
         pulumi.export("mariadb_endpoint", db.endpoint)
         pulumi.export("mariadb_name", db.name)
         pulumi.export("mariadb_domain", db.domain)
+        pulumi.export(
+            "mariadb_r_connection", 
+            pulumi.Output.all(
+                db_address=db.address
+            ).apply(
+                lambda args: f'''con <- DBI::dbConnect(odbc::odbc(), Driver='mysql', Server = '{args["db_address"]}', Port = '3306', UID = '{self.db_username}', PWD = '{self.db_password}', Database = '{self.db_name}', timeout = 10)'''
+            )
+        )
         return db
 
 
@@ -78,17 +93,24 @@ class PostgreSQL:
     database: rds.Instance
     security_group: ec2.SecurityGroup
 
-    def __init__(self, name: str):
-        self.name = name
-        self.config = pulumi.Config()
-        self.tags = self.config.get_object("tags")
+    def __init__(self, pulumi_name: str):
+        self.pulumi_name = pulumi_name
+        # Get and set config values.
+        config = pulumi.Config()
+        self.db_username: str = config.require_object("postgres")["username"]
+        self.db_password: str = config.require_object("postgres")["password"]
+        self.db_name: str = config.require_object("postgres")["database_name"]
+        # AWS tags.
+        self.aws_tags: Dict = config.require_object("aws_tags")
+        self.owner: str = self.aws_tags["rs:owner"]
+        # Create infrastructure.
         self.security_group = self.create_security_group()
         self.database = self.create_database()
 
     def create_security_group(self) -> ec2.SecurityGroup:
         return ec2.SecurityGroup(
-            f"Security Group - {self.name}",
-            description=self.tags["rs:owner"]
+            f"Security Group - {self.pulumi_name}",
+            description=self.owner
             + " security group for Pulumi PostgreSQL deployment.",
             ingress=[
                 {
@@ -108,8 +130,7 @@ class PostgreSQL:
                     "description": "Allow all outbound traffic",
                 },
             ],
-            tags=self.tags
-            | {"Name": f"postgres-{self.tags['rs:owner']}-security-group"},
+            tags=self.aws_tags | {"Name": f"postgres-{self.owner}-security-group"},
         )
 
     def create_database(self):
@@ -117,16 +138,16 @@ class PostgreSQL:
         Create a PostgreSQL database.
         """
         db = rds.Instance(
-            self.name,
+            self.pulumi_name,
             instance_class="db.t3.micro",
             allocated_storage=5,
-            username=self.config.get_object("postgres")["username"],
-            password=self.config.get_object("postgres")["password"],
-            db_name=self.config.get_object("postgres")["database_name"],
+            username=self.db_username,
+            password=self.db_password,
+            db_name=self.db_name,
             engine="postgres",
             publicly_accessible=True,
             skip_final_snapshot=True,
-            tags=self.tags | {"Name": f"postgres-{self.tags['rs:owner']}-database"},
+            tags=self.aws_tags | {"Name": f"postgres-{self.owner}-database"},
             vpc_security_group_ids=[self.security_group.id],
         )
 
@@ -135,6 +156,14 @@ class PostgreSQL:
         pulumi.export("postgres_endpoint", db.endpoint)
         pulumi.export("postgres_name", db.name)
         pulumi.export("postgres_domain", db.domain)
+        pulumi.export(
+            "postgres_r_connection", 
+            pulumi.Output.all(
+                db_address=db.address
+            ).apply(
+                lambda args: f'''con <- DBI::dbConnect(odbc::odbc(), Driver='postgresql', Server = '{args["db_address"]}', Port = '5432', UID = '{self.db_username}', PWD = '{self.db_password}', Database = '{self.db_name}', timeout = 10)'''
+            )
+        )
         return db
 
 
