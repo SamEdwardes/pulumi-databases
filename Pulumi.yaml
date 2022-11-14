@@ -1,0 +1,6 @@
+name: databases
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: Quickly stand up databases for testing using Pulumi and AWS. 

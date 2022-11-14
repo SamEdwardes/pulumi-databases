@@ -1,0 +1,16 @@
+config:
+  aws:region: us-east-2
+  databases:mariadb:
+    create: true
+    database_name: database1
+    password: password
+    username: admin
+  databases:postgres:
+    create: true
+    database_name: database1
+    password: password
+    username: admin
+  databases:tags:
+    rs:environment: development
+    rs:owner: email@posit.co
+    rs:project: solutions
